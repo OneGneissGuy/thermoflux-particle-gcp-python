@@ -5,3 +5,4 @@
 token.pickle
 *credentials*.json
 *.png
+*.log

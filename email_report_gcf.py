@@ -296,7 +296,7 @@ def splitSerToArr(ser):
 if __name__ == "__main__":
     os.chdir(os.path.dirname(sys.argv[0]))
     # print(os.getcwd())
-    print(os.listdir())
+    # print(os.listdir())
 
     # Now send or store the message
     # SENDER = "anapossensing@gmail.com"
