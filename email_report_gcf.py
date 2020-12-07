@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 Created on Wed May 29 13:52:24 2019
-script to build a weeek long water quality data
-report and send it as a gmail attachment
+script to build a week long water quality data
+report and send it as a Gmail attachment
 Read the token built by quickstart.py from credentials.json
 Follow tutorial here https://developers.google.com/gmail/api/quickstart/python
 to enable Google Gmail API and get credentials.json file
-@author: jsaracen
+@author: John Franco Saraceno
 """
 # import necessary packages
 import base64
@@ -294,6 +294,9 @@ def splitSerToArr(ser):
 
 
 if __name__ == "__main__":
+    now = datetime.datetime.now()
+    print ("Current date and time: {}".format(now.strftime("%Y-%m-%d %H:%M:%S")))
+
     os.chdir(os.path.dirname(sys.argv[0]))
     # print(os.getcwd())
     # print(os.listdir())
