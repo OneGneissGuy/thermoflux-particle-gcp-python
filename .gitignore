@@ -1,0 +1,7 @@
+*service*.json
+*account*.json
+*thermoflux*.json
+*boron*.json
+token.pickle
+*credentials*.json
+*.png
