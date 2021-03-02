@@ -1,0 +1,5 @@
+{
+    "python.pythonPath": "/home/jf/anaconda3/envs/gcp-thingspeak/bin/python",
+    "C_Cpp.default.configurationProvider": "particle.particle-vscode-core",
+    "python.formatting.provider": "black"
+}

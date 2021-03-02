@@ -6,10 +6,6 @@ report and send it as a Gmail attachment
 Read the token built by quickstart.py from credentials.json
 Follow tutorial here https://developers.google.com/gmail/api/quickstart/python
 to enable Google Gmail API and get credentials.json file
-
-This script can be run as a cron job:
-5 7 * * * conda activate gcp-thingspeak;python /home/jf/Documents/projects/thermoflux-particle-gcp-python/email_report_gcf.py >> /home/jf/Documents/projects/thermoflux-particle-gcp-python/cron.log 2>&1;conda deactivate
-
 @author: John Franco Saraceno
 """
 # import necessary packages
@@ -177,7 +173,7 @@ def make_a_plot(df, figname, savefig=True):
     """Function to plot data as stacked time series plots"""
     # make the datetimeindex timezone naive to correctly work with plot ticks
     df.index = df.index.tz_localize(None)
-    df = df["02-26-2021":].copy()
+    df = df['02-26-2021':].copy()
     plot_cols = df.columns
     n_plot_cols = 4
     # colors = plt.cm.tab10(np.linspace(0, 1, n_plot_cols))
@@ -243,7 +239,7 @@ def make_a_plot(df, figname, savefig=True):
     axes[1].set_xlabel("")
     axes[1].set_xlim(datemin, datemax)
     axes[1].set_ylim(-5, 30)
-
+    
     axes[1].grid(color="k", ls="--", lw=1.25)
     # plot the data
     axes[2].plot(df.index.values, df["Net Radiation"], marker="o", color="tab:cyan")
@@ -299,105 +295,46 @@ def make_a_plot(df, figname, savefig=True):
 
 def splitSerToArr(ser):
     return [ser.index, ser.values]
+now = datetime.datetime.now()
+print ("Current date and time: {}".format(now.strftime("%Y-%m-%d %H:%M:%S")))
 
+# os.chdir(os.path.dirname(sys.argv[0]))
+# print(os.getcwd())
+# print(os.listdir())
 
-if __name__ == "__main__":
-    dir_path = os.path.dirname(os.path.abspath(__file__))
-    now = datetime.datetime.now()
-    print("Current date and time: {}".format(now.strftime("%Y-%m-%d %H:%M:%S")))
+# Now send or store the message
+# SENDER = "anapossensing@gmail.com"
+SENDER = "jfsaraceno@gmail.com"
 
-    # os.chdir(os.path.dirname(sys.argv[0]))
-    # print(os.getcwd())
-    # print(os.listdir())
+# TODO:Read list of recipients from a file
+RECIPIENTS = [
+    # "report-testing@googlegroups.com",
+    # "LandIQ-data-reports@googlegroups.com",
+    # "anapossensing@gmail.com",
+    "jfsaraceno@gmail.com"
+]
+# Read the token built by quickstart.py from credentials.json
+# Follow tutorial https://developers.google.com/gmail/api/quickstart/python
+GMAIL_CREDS = None
+dir_path = os.path.dirname(os.path.abspath(__file__))
 
-    # Now send or store the message
-    # SENDER = "anapossensing@gmail.com"
-    SENDER = "jfsaraceno@gmail.com"
+gmail_token_file = os.path.join(dir_path,"token.pickle")
+if os.path.exists(gmail_token_file):
+    # print("Using credential file {}".format(gmail_token_file))
+    with open(gmail_token_file, "rb") as token:
+        GMAIL_CREDS = pickle.load(token)
+# create the gmail service obj from the token built by quickstart.py
+GMAIL_SERVICE = build("gmail", "v1", credentials=GMAIL_CREDS)
+# bq and gcs credentials
+# STORAGE_CREDS = json.load(open("storage_service_account.json"))
+# STORAGE_SERVICE = service_account.Credentials.from_service_account_info(
+#     STORAGE_CREDS
+# )
 
-    # TODO:Read list of recipients from a file
-    RECIPIENTS = [
-        # "report-testing@googlegroups.com",
-        "LandIQ-data-reports@googlegroups.com",
-        # "anapossensing@gmail.com",
-        "jfsaraceno@gmail.com",
-    ]
-    # Read the token built by quickstart.py from credentials.json
-    # Follow tutorial https://developers.google.com/gmail/api/quickstart/python
-    GMAIL_CREDS = None
-    gmail_token_file = os.path.join(dir_path, "token.pickle")
-    if os.path.exists(gmail_token_file):
-        # print("Using credential file {}".format(gmail_token_file))
-        with open(gmail_token_file, "rb") as token:
-            GMAIL_CREDS = pickle.load(token)
-    # create the gmail service obj from the token built by quickstart.py
-    GMAIL_SERVICE = build("gmail", "v1", credentials=GMAIL_CREDS)
-    # bq and gcs credentials
-    # STORAGE_CREDS = json.load(open("storage_service_account.json"))
-    # STORAGE_SERVICE = service_account.Credentials.from_service_account_info(
-    #     STORAGE_CREDS
-    # )
+storage_client = storage.Client.from_service_account_json(
+    os.path.join(dir_path,"thermoflux-particle-6cb499f95f01.json")
+)
+# validate the service account by listing the projecy buckets
+print(list(storage_client.list_buckets()))
 
-    storage_client = storage.Client.from_service_account_json(
-        os.path.join(dir_path, "thermoflux-particle-6cb499f95f01.json")
-    )
-    # validate the service account by listing the projecy buckets
-    print(list(storage_client.list_buckets()))
-    bucket_name = "thermoflux-bq-data"
-    bucket_filename_read = "demo_table_backup.csv"
-    bucket_filename_write = "demo-table-export.csv"
-
-    # FILENAME = "gs://{}/{}".format(bucket_name, bucket_filename)
-
-    # storage_client = storage.Client(project = project_id)
-
-    # set path to filename
-    # FILENAME = r"gs://thermoflux-bq-data/demo_table_backup.csv"
-    df_full = fetch_bucket(bucket_name, bucket_filename_read)
-    df_flux = format_dataframe(
-        df_full[["fluxTimeStamp", "flux"]], "fluxTimeStamp", interval="30Min"
-    )
-    df_ancillary = format_dataframe(
-        df_full[["temperature", "netRadiation", "battery", "ancillaryTimeStamp"]],
-        "ancillaryTimeStamp",
-        interval="5Min",
-    )
-    df = df_ancillary.merge(df_flux, how="outer", left_index=True, right_index=True)
-    # shift the time from UTC to local
-    df.index = df.index.tz_convert("US/Pacific")
-    # set the index name for plotting and output
-    df.index.name = "Datetime (PST)"
-
-    push_bucket(df, bucket_name, bucket_filename_write)
-    sites = ["LT_MicroIQ_Alfalfa"]
-    today = date.today().strftime("%m/%d/%Y")
-
-    for SITE in sites:
-        print(SITE)
-        data = df.copy()
-        # data.rename("")
-        columns = data.columns
-        rename_cols = [
-            "Temperature",
-            "Net Radiation",
-            "Battery Voltage",
-            "Sensible Heat Flux",
-        ]
-        rename_cols_dict = dict(zip(columns, rename_cols))
-        data.rename(columns=rename_cols_dict, inplace=True)
-        BODY_TEXT = "This is the daily report for the {} site".format(SITE)
-        # create the output figure name
-        FIGNAME = SITE + " - Daily " + ".png"
-        # plot the data and save as an image
-        make_a_plot(data, FIGNAME)
-        # build an email and add the report as an attachment
-        raw_msg_attch = create_message_with_attachment(
-            SENDER,
-            RECIPIENTS,
-            "{} Daily Report ".format(SITE) + today,
-            BODY_TEXT,
-            FIGNAME,
-        )
-        # send the email
-        print("sending email to", ",".join(RECIPIENTS))
-        send_message(GMAIL_SERVICE, "me", raw_msg_attch)
-        # time.sleep(30)
+print("Task Completed!")
