@@ -101,8 +101,18 @@ df = df_ancillary_raw_avg_30_min.merge(
 df.index = df.index.tz_localize(None).shift(-8, "H")
 # set the index name for plotting and output
 df.index.name = "Datetime (PST)"
-# round
+# round values
 df = df.round(decimals=2)
+# add units to plot cols
+df.rename(
+    columns={
+        "battery": "battery (V)",
+        "temperature": "temperature (C)",
+        "netRadiation": "netRadiation (W/m2)",
+        "flux": "flux (W/m2)",
+    },
+    inplace=True,
+)
 # save output to an csv file
 df.to_csv("demo-table-export-30min-ave.csv")
 
