@@ -9,20 +9,29 @@ from google.cloud import storage
 import os
 
 
-def format_dataframe(dataframe, index_name, interval="5Min"):
+def format_dataframe(
+    data_frame,
+    index_name,
+    interval="5Min",
+    drop_null=True,
+    round_interval=True,
+):
+    dataframe = data_frame.copy()
     dataframe.index = dataframe[index_name]
     # convert the index to a pandas datetimeindex
-    dataframe.drop([index_name], axis=1, inplace=True)
-    # drop empty rows
-    dataframe = dataframe[dataframe.index.notnull()]
+    dataframe.drop([index_name, "device_id"], axis=1, inplace=True)
+    if drop_null:  # drop empty rows
+        dataframe = dataframe[dataframe.index.notnull()]
     # sort the dataframe into descending order
     dataframe = dataframe.sort_index()
+    # dataframe.index = dataframe.index.shift(tz_offset, freq="H")
     # slice data to start at deployment date
     dataframe = dataframe[deployment_date:]
     # convert values to floating points
     dataframe = dataframe.astype(float)
-    # round the data time stamp to the nearest defined interval for later merging
-    dataframe.index = dataframe.index.round(interval)
+    if round_interval:
+        # round the data time stamp to the nearest defined interval for later merging
+        dataframe.index = dataframe.index.round(interval)
     return dataframe.copy()
 
 
@@ -48,51 +57,71 @@ credentials = service_account.Credentials.from_service_account_info(
 client = bigquery.Client.from_service_account_json(credentials_file)
 # create a query for the ancillary data
 ancillary_sql = """
- SELECT temperature, netRadiation, battery, ancillaryTimeStamp FROM `demo_dataset.demo_table`
+ SELECT temperature, netRadiation, battery, ancillaryTimeStamp, device_id FROM `demo_dataset.demo_table`
+ WHERE (device_id = "e00fce68e84fc8ca3d4edf94" AND temperature IS NOT NULL);
  """
 # query ancillary table data from BiqQuery and store it in a pandas dataframe
-df_ancillary = client.query(ancillary_sql).to_dataframe()
+df_ancillary_raw = client.query(ancillary_sql).to_dataframe()
+df_ancillary_raw_sorted = format_dataframe(
+    df_ancillary_raw, "ancillaryTimeStamp", drop_null=False, round_interval=True
+)
+
+df_ancillary_raw_avg_30_min = df_ancillary_raw_sorted.resample(
+    "30min", label="right"
+).mean()
+
+# df_ancillary_raw_sorted.to_csv("demo-table-export-ancillary-raw.csv", index=True)
 
 # cleanup and format the ancillary dataframe
-df_ancillary = format_dataframe(df_ancillary, "ancillaryTimeStamp", interval="5Min")
+# df_ancillary = format_dataframe(df_ancillary_raw, "ancillaryTimeStamp", interval="5Min")
 
-# create a query for the flux data
+# create a query for the flux data #ignore old sensor
 flux_sql = """
- SELECT flux,fluxTimeStamp FROM `demo_dataset.demo_table`
+ SELECT flux,fluxTimeStamp,device_id FROM `demo_dataset.demo_table`
+ WHERE (device_id = "e00fce68e84fc8ca3d4edf94" AND flux IS NOT NULL);
  """
 # query flux table data from BiqQuery and store it in a pandas dataframe
-df_flux = client.query(flux_sql).to_dataframe()
+df_flux_raw = client.query(flux_sql).to_dataframe()
+
+df_flux_raw_sorted = format_dataframe(
+    df_flux_raw, "fluxTimeStamp", drop_null=False, round_interval=False
+)
 # cleanup and format the flux dataframe
-df_flux = format_dataframe(df_flux, "fluxTimeStamp", interval="30Min")
-# filter non-sensical outliers
-df_flux["flux"][(df_flux["flux"] > 500) | (df_flux["flux"] < -500)] = np.nan
+df_flux = format_dataframe(
+    df_flux_raw, "fluxTimeStamp", drop_null=False, interval="30Min"
+)
+# filter non-sensecal outliers
+# df_flux["flux"][(df_flux["flux"] > 500) | (df_flux["flux"] < -500)] = np.nan
 # merge the two dataframes into one dataframe for plotting analysis
-df = df_ancillary.merge(df_flux, how="outer", left_index=True, right_index=True)
-
-# shift the time from UTC to local
-df.index = df.index.tz_convert("US/Pacific")
-
+df = df_ancillary_raw_avg_30_min.merge(
+    df_flux, how="inner", left_index=True, right_index=True
+)
+# shift the time from UTC to local and drop timezone info
+# df.index = df.index.tz_convert("US/Pacific")
+df.index = df.index.tz_localize(None).shift(-8, "H")
 # set the index name for plotting and output
 df.index.name = "Datetime (PST)"
+# round
+df = df.round(decimals=2)
+# save output to an csv file
+df.to_csv("demo-table-export-30min-ave.csv")
 
-# plot the data
-plt.figure()
-df.battery.plot(marker="o")
-plt.ylim(11, 16)
-plt.ylabel("Battery voltage (V)")
-plt.figure()
-df.temperature.plot(marker="o")
-plt.ylabel("Temperature (C)")
-plt.ylim(-5, 30)
-plt.figure()
-df.netRadiation.plot(marker="o")
-plt.ylabel(r"Net radiation, $R_{net}$ $\mathregular{(\frac{W}{m^{2}})}$")
-# plt.ylim(-100, 700)
-plt.figure()
-df.flux.plot(marker="o")
-plt.ylabel(r"Sensible heat flux, $H_{SR}$ $\mathregular{(\frac{W}{m^{2}})}$")
-plt.ylim(-100, 100)
-# count the number of samples in a day (should be 287-288 for ancillary; 47-48 for unfiltered flux)
-df.groupby([df.index.day]).count()
-# save output
-df.to_csv("demo-table-export.csv")
+# # plot the data
+# plt.figure()
+# df.battery.plot(marker="o")
+# plt.ylim(11, 16)
+# plt.ylabel("Battery voltage (V)")
+# plt.figure()
+# df.temperature.plot(marker="o")
+# plt.ylabel("Temperature (C)")
+# plt.ylim(-5, 30)
+# plt.figure()
+# df.netRadiation.plot(marker="o")
+# plt.ylabel(r"Net radiation, $R_{net}$ $\mathregular{(\frac{W}{m^{2}})}$")
+# # plt.ylim(-100, 700)
+# plt.figure()
+# df.flux.plot(marker="o")
+# plt.ylabel(r"Sensible heat flux, $H_{SR}$ $\mathregular{(\frac{W}{m^{2}})}$")
+# plt.ylim(-100, 100)
+# # count the number of samples in a day (should be 287-288 for ancillary; 47-48 for unfiltered flux)
+# df.groupby([df.index.day]).count()
