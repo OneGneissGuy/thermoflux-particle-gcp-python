@@ -97,6 +97,7 @@ def particle_pubsub_msg(event, context):
                 u"device_id": device_id,
                 u"fluxTimeStamp": fluxTimeStamp,
                 u"flux": flux,
+                u"sample_count": sample_count,
             }
         ]
 
