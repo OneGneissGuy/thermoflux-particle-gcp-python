@@ -7,3 +7,5 @@ token.pickle
 *.png
 *.log
 demo-table-export-ancillary-raw.csv
+demo-table-export.csv
+demo-table-export-30min-ave.csv
