@@ -10,16 +10,19 @@ from sendgrid.helpers.mail import (
     FileType,
     Disposition,
     ContentId,
+    To,
+    From,
 )
 from sendgrid import SendGridAPIClient
 
+# to_email = To("LandIQ-data-reports@googlegroups.com", "jfsaraceno@gmail.com")
 message = Mail(
     from_email="contact@anaposensing.com",
-    to_emails="jfsaraceno@gmail.com",
-    subject="Sending with Twilio SendGrid is Fun",
-    html_content="<strong>and easy to do anywhere, even with Python</strong>",
+    to_emails="LandIQ-data-reports@googlegroups.com",
+    subject="Test Email Report Sending with Twilio SendGrid",
+    html_content="<strong>Test Report</strong>",
 )
-file_path = "Voltaic Systems P103 R3B.pdf"
+file_path = "LT_MicroIQ_Alfalfa - Daily .png"
 
 with open(file_path, "rb") as f:
     data = f.read()
@@ -27,8 +30,8 @@ with open(file_path, "rb") as f:
 encoded = base64.b64encode(data).decode()
 attachment = Attachment()
 attachment.file_content = FileContent(encoded)
-attachment.file_type = FileType("application/pdf")
-attachment.file_name = FileName("test_filename.pdf")
+attachment.file_type = FileType("image/png")
+attachment.file_name = FileName("test_report.png")
 attachment.disposition = Disposition("attachment")
 attachment.content_id = ContentId("Example Content ID")
 message.attachment = attachment
