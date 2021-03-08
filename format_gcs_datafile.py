@@ -4,11 +4,8 @@ bigquery to gcs csv file
 # -*- coding: utf-8 -*-
 """
 Created on Wed May 29 13:52:24 2019
-script to build a weeek long water quality data
-report and send it as a gmail attachment
-Read the token built by quickstart.py from credentials.json
-Follow tutorial here https://developers.google.com/gmail/api/quickstart/python
-to enable Google Gmail API and get credentials.json file
+Script to read in a gcs backup datafile and reformat
+to a 30 min average file for analysis 
 @author: jsaracen
 """
 # import necessary packages
@@ -19,31 +16,39 @@ import os
 import sys
 from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
-from google.cloud import bigquery, storage
+from google.cloud import storage
 from google.oauth2 import service_account
-import numpy as np
 import pandas as pd
 
 
-def format_dataframe(dataframe, index_name, interval="5Min"):
+def format_dataframe(
+    data_frame,
+    index_name,
+    interval="5Min",
+    drop_null=True,
+    round_interval=True,
+):
+    dataframe = data_frame.copy()
     dataframe.index = dataframe[index_name]
-    # convert the index to a pandas datetimeindex
     dataframe.index = pd.to_datetime(dataframe.index)
-    dataframe.drop([index_name], axis=1, inplace=True)
-    # drop empty rows
-    dataframe = dataframe[dataframe.index.notnull()]
+    # convert the index to a pandas datetimeindex
+    dataframe.drop([index_name, "device_id"], axis=1, inplace=True)
+    if drop_null:  # drop empty rows
+        dataframe = dataframe[dataframe.index.notnull()]
     # sort the dataframe into descending order
     dataframe = dataframe.sort_index()
+    # dataframe.index = dataframe.index.shift(tz_offset, freq="H")
     # slice data to start at deployment date
     # dataframe = dataframe[deployment_date:]
     # convert values to floating points
     dataframe = dataframe.astype(float)
-    # round the data time stamp to the nearest defined interval for later merging
-    dataframe.index = dataframe.index.round(interval)
+    if round_interval:
+        # round the data time stamp to the nearest defined interval for later merging
+        dataframe.index = dataframe.index.round(interval)
     return dataframe.copy()
 
 
-def fetch_bucket(bucket_name, bucket_filename):
+def fetch_bucket(bucket_name, bucket_filename, storage_client):
     """Function to fetch a gcs storage
     object and return a pandas dataframe"""
     bucket = storage_client.get_bucket(bucket_name)
@@ -56,7 +61,7 @@ def fetch_bucket(bucket_name, bucket_filename):
     return dfbytes
 
 
-def push_bucket(dataframe, bucket_name, bucket_filename):
+def push_bucket(dataframe, bucket_name, bucket_filename_write):
     """Function to push a pandas dataframe
     to a gcs storage object as as csv file"""
     bucket = storage_client.get_bucket(bucket_name)
@@ -67,45 +72,65 @@ def push_bucket(dataframe, bucket_name, bucket_filename):
     return
 
 
-def splitSerToArr(ser):
-    return [ser.index, ser.values]
+def merge_dataframes(df1, df2, col_rename_dict):
+    df = df1.merge(df2, how="inner", left_index=True, right_index=True)
+    # shift the time from UTC to local and drop timezone info
+    df.index = df.index.tz_localize(None).shift(-8, "H")
+    # set the index name for plotting and output
+    df.index.name = "Datetime (PST)"
+    # round values
+    df = df.round(decimals=2)
+    # add units to plot cols
+    df.rename(
+        columns=col_rename_dict,
+        inplace=True,
+    )
+    return df
+
+
+def main():
+    service_account_file = "thermoflux-particle-6cb499f95f01.json"
+    bucket_name = "thermoflux-bq-data"
+    bucket_filename_read = "demo_table_backup.csv"
+    bucket_filename_write = "alfalfa_demo_table_output.csv"
+
+    storage_client = storage.Client.from_service_account_json(service_account_file)
+
+    # FILENAME = "gs://{}/{}".format(bucket_name, bucket_filename)
+    # FILENAME = r"gs://thermoflux-bq-data/demo_table_backup.csv"
+    # pull the backup csv file from the gcs (scheduled backed up from bigquery table)
+    df_full = fetch_bucket(bucket_name, bucket_filename_read, storage_client)
+
+    # format the dataframe
+    df_ancillary = df_full[
+        ["temperature", "netRadiation", "battery", "ancillaryTimeStamp", "device_id"]
+    ]
+    df_ancillary_raw = df_ancillary.drop_duplicates(subset=["ancillaryTimeStamp"])
+    df_ancillary_raw_sorted = format_dataframe(
+        df_ancillary_raw, "ancillaryTimeStamp", drop_null=True, round_interval=True
+    )
+    df_ancillary_raw_avg_30_min = df_ancillary_raw_sorted.resample(
+        "30min", label="right"
+    ).mean()
+    # cleanup and format the flux dataframe
+    df_flux = df_full[["fluxTimeStamp", "flux", "device_id"]]
+    df_flux_raw = df_flux.drop_duplicates(subset=["fluxTimeStamp"])
+    df_flux_raw_sorted = format_dataframe(
+        df_flux_raw, "fluxTimeStamp", drop_null=False, interval="30Min"
+    )
+    # merge the two dataframes into one dataframe for plotting analysis
+    col_rename_dict = {
+        "battery": "Battery voltage (V)",
+        "temperature": "Temperature (C)",
+        "netRadiation": "Net Radiation (W/m2)",
+        "flux": "Sensible heat flux (W/m2)",
+    }
+    df = merge_dataframes(
+        df_ancillary_raw_avg_30_min, df_flux_raw_sorted, col_rename_dict
+    )
+    push_bucket(df, bucket_name, bucket_filename_write)
+    print("Done")
 
 
 if __name__ == "__main__":
-
-    storage_client = storage.Client.from_service_account_json(
-        "thermoflux-particle-6cb499f95f01.json"
-    )
-    # TODO: READ FROM ONE BUCKET, WRITE TO ANOTHER BUCKET
-    # validate the service account by listing the project buckets
-    list(storage_client.list_buckets())
-    bucket_name = "thermoflux-bq-data"
-    bucket_filename_read = "demo_table_backup.csv"
-    bucket_filename_write = "demo-table-export.csv"
-
-    # FILENAME = "gs://{}/{}".format(bucket_name, bucket_filename)
-
-    # storage_client = storage.Client(project = project_id)
-
-    # set path to filename
-    # FILENAME = r"gs://thermoflux-bq-data/demo_table_backup.csv"
-    # pull the formatted csv file
-
-    df_full = fetch_bucket(bucket_name, bucket_filename_read)
-
-    # format the dataframe
-    df_flux = format_dataframe(
-        df_full[["fluxTimeStamp", "flux"]], "fluxTimeStamp", interval="30Min"
-    )
-    df_ancillary = format_dataframe(
-        df_full[["temperature", "netRadiation", "battery", "ancillaryTimeStamp"]],
-        "ancillaryTimeStamp",
-        interval="5Min",
-    )
-    df = df_ancillary.merge(df_flux, how="outer", left_index=True, right_index=True)
-    # shift the time from UTC to local
-    df.index = df.index.tz_convert("US/Pacific")
-    # set the index name for plotting and output
-    df.index.name = "Datetime (PST)"
-    # push the formatted file to a bucket
-    push_bucket(df, bucket_name, bucket_filename_write)
+    main()
