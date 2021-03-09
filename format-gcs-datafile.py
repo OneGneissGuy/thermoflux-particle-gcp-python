@@ -1,12 +1,13 @@
 """
 Created on Wed May 29 13:52:24 2019
 Script to read in a gcs backup datafile and reformat
-to a 30 min average file for analysis 
-this is the client version
+to a 30 min average file for analysis
+THIS IS FOR A GOOGLE CLOUD FUNCTION
 @author: jsaracen
 """
-
+import os
 from io import BytesIO
+
 from google.cloud import storage
 import pandas as pd
 
@@ -27,9 +28,6 @@ def format_dataframe(
         dataframe = dataframe[dataframe.index.notnull()]
     # sort the dataframe into descending order
     dataframe = dataframe.sort_index()
-    # dataframe.index = dataframe.index.shift(tz_offset, freq="H")
-    # slice data to start at deployment date
-    # dataframe = dataframe[deployment_date:]
     # convert values to floating points
     dataframe = dataframe.astype(float)
     if round_interval:
@@ -78,16 +76,13 @@ def merge_dataframes(df1, df2, col_rename_dict):
     return df
 
 
-def main():
-    service_account_file = "thermoflux-particle-6cb499f95f01.json"
-    bucket_name = "thermoflux-bq-data"
-    bucket_filename_read = "demo_table_backup.csv"
-    bucket_filename_write = "alfalfa_demo_table_output.csv"
+def main(event, context):
+    bucket_name = os.environ["BUCKET_NAME"]
+    bucket_filename_read = os.environ["BUCKET_FILENAME_READ"]
+    bucket_filename_write = os.environ["BUCKET_FILENAME_WRITE"]
 
-    storage_client = storage.Client.from_service_account_json(service_account_file)
+    storage_client = storage.Client()
 
-    # FILENAME = "gs://{}/{}".format(bucket_name, bucket_filename)
-    # FILENAME = r"gs://thermoflux-bq-data/demo_table_backup.csv"
     # pull the backup csv file from the gcs (scheduled backed up from bigquery table)
     df_full = fetch_bucket(bucket_name, bucket_filename_read, storage_client)
 
@@ -120,7 +115,3 @@ def main():
     )
     push_bucket(df, bucket_name, bucket_filename_write, storage_client)
     print("Done!")
-
-
-if __name__ == "__main__":
-    main()
