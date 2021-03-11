@@ -80,16 +80,16 @@ def merge_dataframes(df1, df2, col_rename_dict):
 
 def main():
     service_account_file = "thermoflux-particle-6cb499f95f01.json"
-    bucket_name = "thermoflux-bq-data"
+    from_bucket_name = "thermoflux-bq-data"
     bucket_filename_read = "demo_table_backup.csv"
     bucket_filename_write = "alfalfa_demo_table_output.csv"
-
+    to_bucket_name = "thermoflux-output"
     storage_client = storage.Client.from_service_account_json(service_account_file)
 
     # FILENAME = "gs://{}/{}".format(bucket_name, bucket_filename)
     # FILENAME = r"gs://thermoflux-bq-data/demo_table_backup.csv"
     # pull the backup csv file from the gcs (scheduled backed up from bigquery table)
-    df_full = fetch_bucket(bucket_name, bucket_filename_read, storage_client)
+    df_full = fetch_bucket(from_bucket_name, bucket_filename_read, storage_client)
 
     # format the dataframe
     df_ancillary = df_full[
@@ -118,7 +118,7 @@ def main():
     df = merge_dataframes(
         df_ancillary_raw_avg_30_min, df_flux_raw_sorted, col_rename_dict
     )
-    push_bucket(df, bucket_name, bucket_filename_write, storage_client)
+    push_bucket(df, to_bucket_name, bucket_filename_write, storage_client)
     print("Done!")
 
 

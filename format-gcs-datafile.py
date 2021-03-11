@@ -77,14 +77,15 @@ def merge_dataframes(df1, df2, col_rename_dict):
 
 
 def main(event, context):
-    bucket_name = os.environ["BUCKET_NAME"]
+    from_bucket_name = os.environ["FROM_BUCKET_NAME"]
     bucket_filename_read = os.environ["BUCKET_FILENAME_READ"]
     bucket_filename_write = os.environ["BUCKET_FILENAME_WRITE"]
+    to_bucket_name = os.environ["TO_BUCKET_NAME"]
 
     storage_client = storage.Client()
 
     # pull the backup csv file from the gcs (scheduled backed up from bigquery table)
-    df_full = fetch_bucket(bucket_name, bucket_filename_read, storage_client)
+    df_full = fetch_bucket(from_bucket_name, bucket_filename_read, storage_client)
 
     # format the dataframe
     df_ancillary = df_full[
@@ -113,5 +114,5 @@ def main(event, context):
     df = merge_dataframes(
         df_ancillary_raw_avg_30_min, df_flux_raw_sorted, col_rename_dict
     )
-    push_bucket(df, bucket_name, bucket_filename_write, storage_client)
+    push_bucket(df, to_bucket_name, bucket_filename_write, storage_client)
     print("Done!")
