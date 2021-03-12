@@ -1,14 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Created on Wed May 29 13:52:24 2019
-script to build a week long water quality data
-report and send it as a Gmail attachment
-Read the token built by quickstart.py from credentials.json
-Follow tutorial here https://developers.google.com/gmail/api/quickstart/python
-to enable Google Gmail API and get credentials.json file
-
-This script can be run as a cron job:
-5 7 * * * conda activate gcp-thingspeak;python /home/jf/Documents/projects/thermoflux-particle-gcp-python/email_report_gcf.py >> /home/jf/Documents/projects/thermoflux-particle-gcp-python/cron.log 2>&1;conda deactivate
+script to build a week long data
+report
 
 @author: John Franco Saraceno
 """
@@ -18,12 +12,15 @@ from datetime import date
 from io import BytesIO, StringIO
 import os
 import sys
+import tempfile
+
 from google.cloud import storage
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from werkzeug.utils import secure_filename
 
 # set plotting format
 days = mdates.DayLocator(interval=1)  # every year
@@ -52,15 +49,18 @@ def upload_blob(bucket_name, source_file_name, destination_blob_name, storage_cl
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_filename(source_file_name)
     print("File {} uploaded to {}.".format(source_file_name, destination_blob_name))
+    os.remove(source_file_name)
     return
 
 
-def fetch_bucket(bucket_name, bucket_filename):
+def fetch_bucket(bucket_name, bucket_filename, storage_client):
     """Function to fetch a gcs storage
     object and return a pandas dataframe"""
     bucket = storage_client.get_bucket(bucket_name)
     blob = storage.blob.Blob(bucket_filename, bucket)
     content = blob.download_as_string()
+    print("File {} fetched from {}.".format(bucket_filename, bucket_name))
+
     dfbytes = pd.read_csv(
         BytesIO(content), na_values=["NAN", "nan", -999], index_col="Datetime (PST)"
     )
@@ -68,7 +68,7 @@ def fetch_bucket(bucket_name, bucket_filename):
     return dfbytes
 
 
-def make_a_plot(df, figname, savefig=True):
+def make_a_plot(df, figname):
     """Function to plot data as stacked time series plots"""
     # make the datetimeindex timezone naive to correctly work with plot ticks
     df.index = df.index.tz_localize(None)
@@ -91,13 +91,8 @@ def make_a_plot(df, figname, savefig=True):
     fig, axes = plt.subplots(
         n_plot_cols, 1, figsize=(fig_width, fig_height), sharex=False
     )
-    # axes.set_prop_cycle(
-    #     "color", [plt.cm.tab10(i) for i in np.linspace(0, 1, n_plot_cols)
-    # )
     my_colors = [plt.cm.Set1(i) for i in np.linspace(0, 1, n_plot_cols)]
-    # df.plot(subplots=True, ax=axes, xticks=dates_rng, marker="o")
     report_title = figname.split(".")[0]
-    # axes[0].set_title(report_title)
     fig.suptitle(
         report_title,
         fontsize=26,
@@ -120,7 +115,6 @@ def make_a_plot(df, figname, savefig=True):
     axes[0].xaxis.set_major_formatter(date_form)
     axes[0].xaxis.set_minor_locator(hours)
     # add cool legend
-    # axes[0].legend().remove()
     axes[0].grid(color="k", ls="--", lw=1.25)
 
     # plot the data
@@ -164,16 +158,6 @@ def make_a_plot(df, figname, savefig=True):
         ls="-",
         color="tab:brown"
     )
-
-    # axes[3].plot(
-    #     df.index.values,
-    #     df["Sensible Heat Flux"],
-    #     marker="o",
-    #     markersize=6,
-    #     ls="-",
-    #     color="tab:brown",
-    # )
-    # format the ticks
     axes[3].xaxis.set_major_locator(days)
     axes[3].xaxis.set_major_formatter(date_form)
     axes[3].xaxis.set_minor_locator(hours)
@@ -191,9 +175,17 @@ def make_a_plot(df, figname, savefig=True):
     plt.subplots_adjust(top=0.93)  # Add space at top
     # save the figure as a pdf file
     image_fmt = figname.split(".")[-1]
-    if savefig:
-        plt.savefig(figname, format=image_fmt)
-    return
+    # root = os.path.dirname(os.path.abspath(__file__))
+    # figpath = os.path.join(root, figname)
+    path_name = get_file_path(figname)
+    plt.savefig(path_name, format=image_fmt)
+
+    return path_name
+
+
+def get_file_path(filename):
+    file_name = secure_filename(filename)
+    return os.path.join(tempfile.gettempdir(), file_name)
 
 
 def splitSerToArr(ser):
@@ -219,9 +211,11 @@ def create_report(event, context):
         print(SITE)
         # create the output figure name
         FIGNAME = SITE + " - Daily" + ".png"
-        data = fetch_bucket(bucket_name, bucket_filename_read)
+        data = fetch_bucket(bucket_name, bucket_filename_read, storage_client)
         # plot the data and save as an image
-        make_a_plot(data, FIGNAME)
+        FIGPATH = make_a_plot(data, FIGNAME)
         # upload the report to the report gcs data bucket
-        upload_blob(reports_bucket_name, FIGNAME, report_filename, storage_client)
+        # upload_blob(bucket_name, source_file_name, destination_blob_name, storage_client)
+
+        upload_blob(reports_bucket_name, FIGPATH, report_filename, storage_client)
     print("Done!")
