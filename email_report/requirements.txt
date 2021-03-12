@@ -1,2 +1,5 @@
-google-cloud-storage
-sendgrid
+# Function dependencies, for example:
+# package>=version
+datetime
+google-cloud-storage==1.29.0
+sendgrid==6.6.0

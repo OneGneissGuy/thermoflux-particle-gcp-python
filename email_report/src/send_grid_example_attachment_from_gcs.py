@@ -1,5 +1,6 @@
 import base64
 import os
+from datetime import date
 
 # import json
 from urllib.parse import urlparse
@@ -30,7 +31,7 @@ def create_attachment(report):
     attachment = Attachment()
     attachment.file_content = FileContent(encoded)
     attachment.file_type = FileType("image/png")
-    attachment.file_name = FileName("test_report.png")
+    attachment.file_name = FileName("Daily_Report.png")
     attachment.disposition = Disposition("attachment")
     attachment.content_id = ContentId("Example Content ID")
     return attachment
@@ -49,12 +50,18 @@ def email_report(event, context):
     storage_client = storage.Client()
     url = "https://storage.cloud.google.com/thermoflux-reports/report.png"
     report = fetch_report(url, storage_client)
-    to_email = [("report-testing@googlegroups.com"), ("jfsaraceno@gmail.com")]
-
+    to_email = [
+        ("LandIQ-data-reports@googlegroups.com"),
+        ("jfsaraceno@gmail.com"),
+    ]  # ("report-testing@googlegroups.com"),
+    today = date.today().strftime("%m/%d/%Y")
+    title = ["LT_MicroIQ_Alfalfa", "Daily Report", today]
+    sep = " "
+    subject = sep.join(title)
     message = Mail(
         from_email=("contact@anaposensing.com", "Anapos Sensing and Design"),
         to_emails=to_email,
-        subject="Daily Report",
+        subject=subject,
         html_content="""
         <p>
         <strong>Daily Report<strong>
