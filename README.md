@@ -1,1 +1,2 @@
 ### README
+This is a collection of python scripts to run serverless backend services on the Google Cloud Platform as Google Cloud Functions.These ETL (extract, transform, load) services handle data transfers from LandIQ Micro IQ Stations to a Google BigQuery database, back up data to Google Cloud Storage and generate daily email reports.
