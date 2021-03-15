@@ -8,7 +8,7 @@ Follow tutorial here https://developers.google.com/gmail/api/quickstart/python
 to enable Google Gmail API and get credentials.json file
 
 This script can be run as a cron job:
-5 7 * * * conda activate gcp-thingspeak;python /home/jf/Documents/projects/thermoflux-particle-gcp-python/email_report_gcf.py >> /home/jf/Documents/projects/thermoflux-particle-gcp-python/cron.log 2>&1;conda deactivate
+5 7 * * * conda activate gcp-thingspeak;python /home/jf/Documents/projects/thermoflux-particle-gcp-python/email_report_gmail.py >> /home/jf/Documents/projects/thermoflux-particle-gcp-python/cron.log 2>&1;conda deactivate
 
 @author: John Franco Saraceno
 """
@@ -16,23 +16,15 @@ This script can be run as a cron job:
 import base64
 from datetime import date
 import datetime
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
 import fnmatch
 from io import BytesIO, StringIO
 import mimetypes
 import os
 import pickle
-from sendgrid.helpers.mail import (
-    Mail,
-    Attachment,
-    FileContent,
-    FileName,
-    FileType,
-    Disposition,
-    ContentId,
-    To,
-    From,
-)
-from sendgrid import SendGridAPIClient
 import sys
 from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
@@ -71,25 +63,25 @@ plt.rcParams["xtick.bottom"] = True
 plt.rcParams["ytick.left"] = True
 
 
-def send_message(apikey, message):
+def send_message(service, user_id, message):
     """Send an email message.
     Args:
+      service: Authorized Gmail API service instance.
+      user_id: User's email address. The special value "me"
+      can be used to indicate the authenticated user.
       message: Message to be sent.
-      apikey: Sendgrid apikey: file or environ
     Returns:
-      Sent Message Code.
+      Sent Message.
     """
     try:
-        with open(apikey) as f:
-            data = json.load(f)
-        #    sendgrid_client = SendGridAPIClient(os.environ.get("SENDGRID_API_KEY"))
-        sendgrid_client = SendGridAPIClient(data["SENDGRID_API_KEY"])
-        response = sendgrid_client.send(message)
-        print(response.status_code)
-        print(response.body)
-        print(response.headers)
-    except Exception as e:
-        print(e.message)
+        message = (
+            service.users().messages().send(userId=user_id, body=message).execute()
+        )
+        print("Message Id: %s" % message["id"])
+        return message
+    except HttpError as error:
+        print("An error occurred:", error)
+
 
 def create_message_with_attachment(sender, to, subject, message_text, file):
     """Create a message for an email.
@@ -102,27 +94,42 @@ def create_message_with_attachment(sender, to, subject, message_text, file):
     Returns:
       An object containing a base64url encoded email object.
     """
-    # html_content = "<strong>"+message_text+"</strong>"
-    message = Mail(
-    from_email=sender,
-    to_emails=to,
-    subject=subject
-    html_content="<strong>Daily Report</strong>",
-    )
-    # file = "LT_MicroIQ_Alfalfa - Daily .png"
+    message = MIMEMultipart()
+    if isinstance(to, list):
+        message["to"] = ", ".join(to)
+    else:
+        message["to"] = to
 
-    with open(file, "rb") as f:
-        data = f.read()
-        f.close()
-    encoded = base64.b64encode(data).decode()
-    attachment = Attachment()
-    attachment.file_content = FileContent(encoded)
-    attachment.file_type = FileType("image/png")
-    attachment.file_name = FileName(file)
-    attachment.disposition = Disposition("attachment")
-    attachment.content_id = ContentId("Example Content ID")
-    message.attachment = attachment
-    return message
+    message["from"] = sender
+    message["subject"] = subject
+
+    msg = MIMEText(message_text)
+    message.attach(msg)
+    content_type, encoding = mimetypes.guess_type(file)
+
+    if content_type is None or encoding is not None:
+        content_type = "application/octet-stream"
+
+    main_type, sub_type = content_type.split("/", 1)
+    if main_type == "text":
+        fp = open(file, "rb")
+        msg = MIMEText(fp.read(), _subtype=sub_type)
+        fp.close()
+    elif main_type == "image":
+        fp = open(file, "rb")
+        msg = MIMEImage(fp.read(), _subtype=sub_type)
+        fp.close()
+    else:
+        fp = open(file, "rb")
+        msg = MIMEBase(main_type, sub_type)
+        msg.set_payload(fp.read())
+        fp.close()
+    filename = os.path.basename(file)
+    msg.add_header("Content-Disposition", "attachment", filename=filename)
+    message.attach(msg)
+    encoded_message = base64.urlsafe_b64encode(message.as_bytes())
+    return {"raw": encoded_message.decode()}
+
 
 def format_dataframe(dataframe, index_name, interval="5Min"):
     dataframe.index = dataframe[index_name]
@@ -305,22 +312,35 @@ if __name__ == "__main__":
 
     # Now send or store the message
     # SENDER = "anapossensing@gmail.com"
-    SENDER = "contact@anaposensing.com"
+    SENDER = "jfsaraceno@gmail.com"
 
     # TODO:Read list of recipients from a file
-    # RECIPIENTS = [
-    #     "report-testing@googlegroups.com",
-    #     # "LandIQ-data-reports@googlegroups.com",
-    #     # "anapossensing@gmail.com",
-    #     "jfsaraceno@gmail.com",
-    # ]
-    # RECIPIENTS = To("report-testing@googlegroups.com","jfsaraceno@gmail.com")
-    RECIPIENTS = "report-testing@googlegroups.com"
+    RECIPIENTS = [
+        # "report-testing@googlegroups.com",
+        "LandIQ-data-reports@googlegroups.com",
+        # "anapossensing@gmail.com",
+        "jfsaraceno@gmail.com",
+    ]
+    # Read the token built by quickstart.py from credentials.json
+    # Follow tutorial https://developers.google.com/gmail/api/quickstart/python
+    GMAIL_CREDS = None
+    gmail_token_file = os.path.join(dir_path, "token.pickle")
+    if os.path.exists(gmail_token_file):
+        # print("Using credential file {}".format(gmail_token_file))
+        with open(gmail_token_file, "rb") as token:
+            GMAIL_CREDS = pickle.load(token)
+    # create the gmail service obj from the token built by quickstart.py
+    GMAIL_SERVICE = build("gmail", "v1", credentials=GMAIL_CREDS)
+    # bq and gcs credentials
+    # STORAGE_CREDS = json.load(open("storage_service_account.json"))
+    # STORAGE_SERVICE = service_account.Credentials.from_service_account_info(
+    #     STORAGE_CREDS
+    # )
 
     storage_client = storage.Client.from_service_account_json(
         os.path.join(dir_path, "thermoflux-particle-6cb499f95f01.json")
     )
-    # validate the service account by listing the project buckets
+    # validate the service account by listing the projecy buckets
     print(list(storage_client.list_buckets()))
     bucket_name = "thermoflux-bq-data"
     bucket_filename_read = "demo_table_backup.csv"
@@ -366,13 +386,18 @@ if __name__ == "__main__":
         data.rename(columns=rename_cols_dict, inplace=True)
         BODY_TEXT = "This is the daily report for the {} site".format(SITE)
         # create the output figure name
-        FIGNAME = SITE + "-Daily.png"
-        #for gcf the path must start with \tmp
+        FIGNAME = SITE + " - Daily " + ".png"
         # plot the data and save as an image
         make_a_plot(data, FIGNAME)
         # build an email and add the report as an attachment
-        SUBJECT = "{} Daily Report ".format(SITE) + today
-        message_to_send = create_message_with_attachment(SENDER, RECIPIENTS, SUBJECT, BODY_TEXT, FIGNAME)
-        # send email
-        send_message("sendmail-apikey.json", message_to_send)
+        raw_msg_attch = create_message_with_attachment(
+            SENDER,
+            RECIPIENTS,
+            "{} Daily Report ".format(SITE) + today,
+            BODY_TEXT,
+            FIGNAME,
+        )
+        # send the email
+        print("sending email to", ",".join(RECIPIENTS))
+        send_message(GMAIL_SERVICE, "me", raw_msg_attch)
         # time.sleep(30)
